@@ -1,1 +1,4 @@
 node_modules
+initial-template.yaml
+
+app/*/*.js

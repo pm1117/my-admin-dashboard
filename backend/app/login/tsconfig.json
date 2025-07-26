@@ -1,0 +1,20 @@
+{
+    "extends": "../../tsconfig.json",
+    "compilerOptions": {
+        "baseUrl": ".",
+        "paths": {
+            "*": [
+                "./node_modules/*",
+                "./node_modules/@types/*",
+                "../../layers/nodejs/node_modules/*",
+                "../../layers/nodejs/node_modules/@types/*"
+            ],
+            "/opt/*": [
+                "../../layers/*"
+            ]
+        }
+    },
+    "include": [
+        "./*.ts"
+    ],
+}
