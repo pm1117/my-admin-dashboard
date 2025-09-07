@@ -1,24 +1,120 @@
-# This is the SAM template that represents the architecture of your serverless application
-# https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-sam-template-basics.html
-
-# The AWSTemplateFormatVersion identifies the capabilities of the template
-# https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/format-version-structure.html
 AWSTemplateFormatVersion: 2010-09-09
 Description: >-
-  my-admin-dashboard-backend
+  my-admin-dashboard-backend dev
 
-# Transform section specifies one or more macros that AWS CloudFormation uses to process your template
-# https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/transform-section-structure.html
 Transform:
 - AWS::Serverless-2016-10-31
 
-# Resources declares the AWS resources that you want to include in the stack
-# https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/resources-section-structure.html
-Resources:
-  # Each Lambda function is defined by properties:
-  # https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+Parameters:
+  Env:
+    Type: String
+    Default: prod
+  StageName:
+    Type: String
+    Default: Prod
+    Description: Name of API stage.
+  Version:
+    Type: String
+    Default: v1.0.0
+    Description: Version of the API.
+  DomainName:
+    Type: String
+    Default: example.com
+    Description: Domain for API
+  HostedZoneId:
+    Type: String
+    Default: Z1234567890ABC
+    Description: Hosted Zone ID for the domain
+  CertificateArn:
+    Type: String
+    Default: arn:aws:acm:us-east-1:123456789012:certificate/12345678-1234-1234-1234-123456789012
+    Description: ARN of the ACM certificate for the domain
+  AfterEmail:
+    Type: String
+    Default: ""
+    Description: Email for alert
+  Product1URL:
+    Type: String
+    Default: https://api.example.com
+    Description: URL for the product API
+  # CrossAccountLambdaArn:
+  #   Type: String
+  #   Default: arn:aws:lambda:us-east-1:123456789012:function:cross-account-lambda
+  #   Description: ARN of the cross-account Lambda function
+  medialFeePrice:
+    Type: Number
+    Default: 2500
+    Description: Price for the medial fee
+  EmailSupport:
+    Type: String
+    Default: ""
+    Description: Email address for support
+  EmailTeam:
+    Type: String
+    Default: ""
+    Description: Email address for the team
+  TaxId:
+    Type: String
+    Default: ""
+    Description: Tax ID for the organization
 
-  # This is a Lambda function config associated with the source code: get-all-items.js
+
+Globals:
+  Function:
+    Timeout: 60
+    Tracing: Active
+  Api:
+    TracingEnabled: true # X-Ray setting
+    Cors:
+      AllowMethods: "'OPTIONS,GET,PUT,POST,DELETE'"
+      AllowHeaders: "'*'"
+      AllowOrigin: "'*'"
+
+Resources:
+  # API Key
+  DevApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    Properties:
+      Name: DevApiKey
+      Description: API Key for development environment
+      StageKeys:
+        - RestApiId: !Ref serverlessRestApi
+          StageName: !Ref StageName
+
+  ApiUsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    Properties:
+      UsagePlanName: !Sub ${AWS::StackName}-usage-plan
+      Description: Usage plan for production environment
+      ApiStages:
+        - ApiId: !Ref serverlessRestApi
+          Stage: !Ref StageName
+      Throttle:
+        BurstLimit: 1000
+        RateLimit: 200
+      Quota:
+        Limit: 100000
+        Period: DAY
+
+  ApiUsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: !Ref DevApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref ApiUsagePlan
+
+  # Lambda Layer
+  DevLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: DevLayer
+      Description: Common utilities
+      ContentUri: layers
+      CompatibleRuntimes:
+        - nodejs22.x
+      RetentionPolicy: Retain
+
+  # Lambda Functions
   getAllItemsFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -43,77 +139,596 @@ Resources:
           Properties:
             Path: /
             Method: GET
-  # Each Lambda function is defined by properties:
-  # https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
 
-  # This is a Lambda function config associated with the source code: get-by-id.js
-  getByIdFunction:
+  loginFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Handler: src/handlers/get-by-id.getByIdHandler
+      Handler: app/login.loginHandler
       Runtime: nodejs22.x
-      Architectures:
-        - x86_64
-      MemorySize: 128
-      Timeout: 100
-      Description: A simple example includes a HTTP get method to get one item by id from a DynamoDB table.
-      Policies:
-        # Give Create/Read/Update/Delete Permissions to the SampleTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref SampleTable
+      Layers:
+        - !Ref DevLayer
+      Role: !GetAtt cognitoAndDynamoDBRole.Arn
+      Tracing: Active
       Environment:
-        Variables:
-          # Make table name accessible as environment variable from function code during execution
-          SAMPLE_TABLE: !Ref SampleTable
+        Variables:          
+          USER_TABLE: !Ref userTableDev
+          COGNITO_USER_POOL_ID: !Ref cognitoUserPoolDev
+          COGNITO_USER_POOL_CLIENT_ID: !Ref cognitoUserPoolClientDev
+          COGNITO_USER_POOL_CLIENT_SECRET_NAME: !Sub cognito-client-secret-${Env}
+          VERSION: !Sub ${AppVersion}
       Events:
-        Api:
+        GwApiEvent:
           Type: Api
           Properties:
-            Path: /{id}
-            Method: GET
-  # Each Lambda function is defined by properties:
-  # https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
-
-  # This is a Lambda function config associated with the source code: put-item.js
-  putItemFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: src/handlers/put-item.putItemHandler
-      Runtime: nodejs22.x
-      Architectures:
-        - x86_64
-      MemorySize: 128
-      Timeout: 100
-      Description: A simple example includes a HTTP post method to add one item to a DynamoDB table.
-      Policies:
-        # Give Create/Read/Update/Delete Permissions to the SampleTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref SampleTable
-      Environment:
-        Variables:
-          # Make table name accessible as environment variable from function code during execution
-          SAMPLE_TABLE: !Ref SampleTable
-      Events:
-        Api:
-          Type: Api
-          Properties:
-            Path: /
+            RestApiId: !Ref ServerlessRestApi
+            Path: /login
             Method: POST
-  # Simple syntax to create a DynamoDB table with a single attribute primary key, more in
-  # https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlesssimpletable
+            Auth:
+              Authorizer: NONE
+              ApiKeyRequired: false
+              OverrideApiAuth: true
 
-  # DynamoDB table to store item: {id: &lt;ID&gt;, name: &lt;NAME&gt;}
-  SampleTable:
-    Type: AWS::Serverless::SimpleTable
+  # Bucket for storing
+  S3PublishBucket:
+    Type: AWS::S3::Bucket
     Properties:
+      BucketName: my-admin-dashboard-${Env}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+
+  # Role
+  cognitoCrudPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Policy for Cognito CRUD operations
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - cognito-idp:AdminGetUser
+              - cognito-idp:AdminCreateUser
+              - cognito-idp:AdminDeleteUser
+              - cognito-idp:AdminUpdateUserAttributes
+              - cognito-idp:AdminSetUserPassword
+              - cognito-idp:AdminResetUserPassword
+              - cognito-idp:ListUsers
+              - cognito-idp:InitiateAuth
+              - cognito-idp:GlobalSignOut
+            Resource: 
+              - !GetAtt cognitoUserPoolDev.Arn
+          
+  dynamoDBCrudPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Policy for DynamoDB CRUD operations
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - dynamodb:Query
+              - dynamodb:Scan
+              - dynamodb:GetItem
+              - dynamodb:PutItem
+              - dynamodb:DeleteItem              
+              - dynamodb:UpdateItem
+              - dynamodb:BatchGetItem
+              - dynamodb:BatchWriteItem
+            Resource:
+              # - !GetAtt companyTableDev.Arn
+              - !GetAtt userTableDev.Arn
+              # - !Sub ${companyTableDev}/index/*
+              - !Sub ${userTableDev}/index/*
+              # - !GetAtt userConsentTableDev.Arn
+              # - !GetAtt userPaymentTableDev.Arn
+              # - !Sub ${userPaymentTableDev}/index/*
+              # - !GetAtt companySubscriptionTableDev.Arn
+              # - !Sub ${companySubscriptionTableDev}/index/*
+          - Effect: Allow
+            Action:
+              - dynamodb:GetRecords
+              - dynamodb:GetShardIterator
+              - dynamodb:DescribeStream
+              - dynamodb:ListStreams
+            Resource:
+              - !GetAtt companyTableDev.StreamArn
+              - !GetAtt userTableDev.StreamArn
+
+  dynamoDBCrudConditionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - dynamodb:BatchGetItem
+              - dynamodb:GetItem
+              - dynamodb:Query
+              - dynamodb:Scan
+              - dynamodb:BatchWriteItem
+              - dynamodb:PutItem
+              - dynamodb:UpdateItem
+              - dynamodb:DeleteItem
+            Resource:
+              - !GetAtt userTableDev.Arn              
+            Condition:
+              StringEquals:
+                # 実行しているユーザーのcompanyIdとアクセスしようとしているデータのcompanyIdが同じであることを条件にする
+                "dynamodb:LeadingKeys": "${aws:PrincipalTag/companyId}"
+
+  secretsManagerPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource:
+              - !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:cognito-client-secret-${Env}-*
+              - !Ref ApiSecretDev
+
+  secretsManagerRotationPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+              - secretsmanager:PutSecretValue
+              - secretsmanager:UpdateSecretVersionStage
+              - secretsmanager:DescribeSecret
+              - secretsmanager:UpdateSecret
+            Resource:
+              - !Sub ApiSecretDev
+
+  SESPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Policy for sending emails via SES
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - ses:SendEmail
+              - ses:SendRawEmail
+            Resource: "*"
+
+  InvokeFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Policy for invoking Lambda functions
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+            Resource: "*"
+
+  InvokeInvoiceFunctionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Policy for invoking invoice Lambda functions
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+            Resource:
+              - "*"
+              - !Ref CrossAccountLambdaArn
+
+  cognitoAndDynamoDBRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: lambda.amazonaws.com
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !Ref cognitoCrudPolicy
+        - !Ref dynamoDBCrudPolicy
+        - !Ref secretsManagePolicy
+        - !Ref SESPolicy
+
+  dynamoDBRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: dynamodb.amazonaws.com
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+        - !Ref dynamoDBCrudPolicy
+        - !Ref secretsManagePolicy
+        - !Ref SESPolicy
+
+  dynamoDBConditionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: lambda.amazonaws.com
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.amazonaws.com
+            Action: sts:AssumeRoleRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                "cognito-identity.amazonaws.com:aud": !Ref cognitoIdentityPoolDev
+              "ForAnyValue:StringLike":
+                "cognito-identity.amazonaws.com:amr": authenticated
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+        - !Ref dynamoDBCrudConditionPolicy
+
+  eventDynamoDBRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: lambda.amazonaws.com
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+        - !Ref cognitoCrudPolicy
+        - !Ref dynamoDBCrudPolicy
+        - !Ref InvokeFunctionPolicy
+
+  eventCreateInvoiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: lambda.amazonaws.com
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+        - !Ref dynamoDBCrudPolicy
+        - !Ref InvokeInvoiceFunctionPolicy
+
+  apiGatewayCloudWatchLogRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
+        - !Ref secretsManagerRotationPolicy
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - apigateway.amazonaws.com
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: ApiGatewayCloudWatchLogPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - apicateway:POST
+                  - apigatewya:DELETE
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:apigateway:${AWS::Region}::/*"
+
+  # DynamoDB
+  userTableDev:
+    Type: AWS::Serverless::SimpleTable
+    DeletionPolicy: Retain
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: companyId
+          AttributeType: S
+        - AttributeName: userId
+          AttributeType: S
+        - AttributeName: email
+          AttributeType: S
+      KeySchema:
+        - AttributeName: companyId
+          KeyType: HASH
+        - AttributeName: userId
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: userId-index
+          KeySchema:
+            - AttributeName: userId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
       PrimaryKey:
-        Name: id
+        Name: userId
         Type: String
       ProvisionedThroughput:
         ReadCapacityUnits: 2
         WriteCapacityUnits: 2
+      BillingMode: PAY_PER_REQUEST
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  # Cognito
+  cognitoUserPoolDev:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub ${AWS::StackName}_UserPool
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+      AliasAttributes:
+        - email
+        - preferred_username
+      EmailConfiguration:
+        EmailSendingAccount: DEVELOPER
+        SourceArn: !Sub "arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/no-reply@example.com"
+        From: "no-reply@example.com"
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: false
+      LambdaConfig:
+        # 循環参照になるため、!Subで指定
+        PreSignUp: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:preSignUpFunction-${Env}"
+  
+  cognitoUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub ${cognitoUserPoolDev}_clientApp
+      UserPoolId: !Ref cognitoUserPoolDev
+      GenerateSecret: true
+      PreventUserExistenceErrors: ENABLED
+      ExplicitAuthFlows:        
+        - ALLOW_CUSTOM_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_USER_SRP_AUTH
+      
+  AllowCognitoInvokeCustomMessage:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref customCognitoMailLambda
+      Action: lambda:InvokeFunction
+      Principal: cognito-idp.amazonaws.com
+      SourceArn: !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/*
+
+  cognitoIdentityPoolDev:
+    Type: AWS::Cognito::IdentityPool
+    Properties:
+      IdentityPoolName: !Sub ${AWS::StackName}_IdentityPool
+      AllowUnauthenticatedIdentities: false
+      CognitoIdentityProviders:
+        - ClientId: !Ref cognitoUserPoolClientDev
+          ProviderName: !GetAtt cognitoUserPoolDev.ProviderName
+          ServerSideTokenCheck: false
+
+  IdentityPoolRoleAttachment:
+    Type: AWS::Cognito::IdentityPoolRoleAttachment
+    Properties:
+      IdentityPoolId: !Ref cognitoIdentityPoolDev
+      Roles:
+        authenticated: !GetAtt cognitoAndDynamoDBRole.Arn
+      RoleMappings:
+        CognitoMapping:
+          Type: Rules
+          AmbiguousRoleResolution: "AuthenticatedRole"
+          IdentityProvider: !Sub "cognito-idp.${AWS::Region}.amazonaws.com/${cognitoUserPoolDev}:${cognitoUserPoolClientDev}"
+          RulesConfiguration:
+            Rules:
+              - Claim: custom:companyId
+                MatchType: Equals
+                Value: "*"
+                RoleArn: !GetAtt cognitoAndDynamoDBRole.Arn
+
+  # WAF
+  WAFWebACL:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: !Sub ${AWS::StackName}-web-acl
+      Scope: REGIONAL
+      DefaultAction:
+        Allow: {}
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: !Sub ${AWS::StackName}-web-acl
+      Rules:
+        - Name: "CountryAllowRule"
+          Priority: 1
+          Action:
+            Allow: {}
+          Statement:
+            GeoMatchStatement:
+              CountryCodes:
+                - "JP" # Japan
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: "CountryAllowRuleMetric"
+        - Name: AllowSpecificIPs
+          Priority: 2
+          Action:
+            Allow: {}
+          Statement:
+            IPSetReferenceStatement:
+              Arn: !GetAtt AllowIPSet.Arn
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AllowSpecificIPs
+      # CloudWatchにWAFのルールやWebACLのメトリクスを送信する設定、出力されるようにする
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: "WAFWebACLMetric"
+
+  AllowIPSet:
+    Type: AWS::WAFv2::IPSet
+    Properties:
+      Name: !Sub ${AWS::StackName}-AllowedIPs
+      Scope: REGIONAL
+      IPAddressVersion: IPV4
+      Addresses:
+        - 0.0.0.0/0 # Allow all IPs, change this to restrict access
+
+  WAFWebACLAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Properties:
+      ResourceArn: !Sub arn:aws:apigateway:${AWS::Region}::/restapis/${ServerlessRestApi}/stages/${StageName}
+      WebACLArn: !Ref WAFWebACL
+
+  # secret
+  ApiSecretDev:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub ${AWS::StackName}-secret
+      SecretString: '{"SAMPLE_SECRET": "sample_value"}'
+
+  ApiSecretRotationSchedule:
+    Type: AWS::SecretsManager::RotationSchedule
+    Properties:
+      SecretId: !Ref ApiSecretDev
+      RotationLambdaARN: !GetAtt secretRotationLambda.Arn
+      RotationRules:
+        AutomaticallyAfterDays: 30
+      
+  # GuardDuty
+  GuardDutySNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: GuardDutyAlertsTopic
+
+  GuardDutySNSSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref GuardDutySNSTopic
+      Protocol: email
+      Endpoint: !Ref AfterEmail
+
+  GuardDutyTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref GuardDutySNSTopic
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref GuardDutySNSTopic
+            
+  # GuardDut EventBridge
+  GuardDutyEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: guardduty-event
+      Description: "Rule to capture GuardDuty findings"
+      EventPattern:
+        source:
+          - aws.guardduty
+        detail-type:
+          - GuardDuty Finding
+        detail:
+          severity:
+            - numeric:
+              - ">="
+              - 7
+      State: ENABLED
+      Targets:
+        - Arn: !Ref GuardDutySNSTopic
+          Id: guardduty-event
+          InputTransformer:
+            InputPathsMap:
+              detail: "$.detail"
+            InputTemplate: "{\"detail\": <detail>}"
+
+  # Api Gateway
+  apiGatewayAttachCloudWatchLogArn:
+    Type: AWS::ApiGateway::Account
+    Properties:
+      CloudWatchRoleArn: !GetAtt apiGatewayCloudWatchLogRole.Arn
+
+  apiGatewayAccessLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/api-gateway/access-logs-${Env}"
+      RetentionInDays: 30
+
+  serverlessRestApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub ${AWS::StackName}
+      StageName: !Ref StageName
+      AccessLogSetting:
+        DestinationArn: !GetAtt apiGatewayAccessLogs.Arn
+        Format: $context.requestId
+      TracingEnabled: true
+      DefinitionBody:
+        Name: AWS::Include
+        Parameters:
+          Location: openapi/index.yaml
+      Domain:
+        DomainName: !Ref DomainName
+        CertificateArn: !Ref CertificateArn
+        Route53:
+          HostedZoneId: !Ref HostedZoneId
+      Auth:
+        ApiKeyRequired: true
+        DefaultAuthorizer: cognitoAuthorizer
+        Authorizers:
+          cognitoAuthorizer:
+            FunctionArn: !Ref lambdaAuthorizerFunction
+            Identity:
+              ReauthorizeEvery: 0
+              Headers:
+                - Authorization
+      EndpointConfiguration: REGIONAL
+      MethodSettings:
+        - LoggingLevel: INFO
+          ResourcePath: "/*"
+          HttpMethod: "*"
+          MetricsEnabled: true
+          DataTraceEnabled: true
 
 Outputs:
   WebEndpoint:
-    Description: "API Gateway endpoint URL for Prod stage"
-    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
+    Description: "API Gateway endpoint URL for Dev stage"
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Dev/"

@@ -21,9 +21,11 @@ import {
 import { GetSecretValueCommand, SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
-import { get } from 'http';
 import { UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { handleError } from '/opt/nodejs/utils/error';
+import { toAuthenticationResultModel } from '/opt/nodejs/models/auth';
+import { getUser } from '/opt/nodejs/utils/user';
+import { User } from '/opt/nodejs/models/user';
 
 const awsRegion = process.env.AWS_REGION || 'ap-northeast-1';
 const cognitoUserPoolId = process.env.COGNITO_USER_POOL_ID || '';
@@ -133,7 +135,6 @@ async function handleAuthenticationSuccess(
 ) {
     const AuthenticationResult = toAuthenticationResultModel(authResult);
     const user = await getUser(cognito, documentClient, userName);
-    const userConsents = await getUserConsentByUserId(documentClient, userName);
 
     return {
         statusCode: 200,
@@ -141,7 +142,6 @@ async function handleAuthenticationSuccess(
             AuthenticationResult,
             user: {
                 ...user,
-                consents: userConsents,
             },
         }),
     };
@@ -169,7 +169,6 @@ async function handleAuthChallenge(
 
     await updateUserStatus(input.data.userName, input.data.password);
     const user = await getUser(cognito, documentClient, input.data.userName);
-    const userConsents = await getUserConsentByUserId(documentClient, input.data.userName);
 
     return {
         statusCode: 200,
@@ -177,7 +176,6 @@ async function handleAuthChallenge(
             AuthenticationResult: toAuthenticationResultModel(authResult),
             user: {
                 ...user,
-                consents: userConsents,
             },
         }),
     }
